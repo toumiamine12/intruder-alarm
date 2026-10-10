@@ -1,109 +1,120 @@
 # Desk Intruder Alarm
 
-<!-- Record the demo first (see "How the demo GIF was made"), then uncomment:
-![demo](docs/demo.gif)
--->
+<!-- ![demo](docs/demo.gif) -->
 
-A webcam watches your desk. When something moves inside the zone you draw, a red **INTRUDER** banner appears,
-the moving object gets boxed, a bell rings and a timestamped snapshot is saved.
+Real-time webcam motion alarm in C++17 and OpenCV. When something moves inside a user-defined detection zone,
+the app shows a red **INTRUDER** banner, boxes the moving object, plays a bell and saves a timestamped snapshot.
 
-The core image-processing pipeline (background model, histogram, Otsu threshold, temporal filter) is
-**written by hand in C++**, and unit tests check every piece; my Otsu is checked against OpenCV's own implementation.
-
-Built as a portfolio project for my **Image Processing (Bildverarbeitung)** module.
+The core pipeline (background model, histogram, Otsu threshold, binary segmentation, temporal filter) is
+implemented from scratch and covered by unit tests. The Otsu implementation is verified against OpenCV's.
 
 ## Features
 
-- Live motion detection at webcam frame rate on a normal laptop CPU
-- Detection zone: drag a rectangle with the mouse, so only motion inside it counts
-- Alarm: red banner, red box around the intruder, a bell on trigger, a snapshot every 3 s to `snapshots/`
-- Debug view (`d`): difference image, binary mask, and the histogram with the chosen threshold
-- No false alarms from sensor noise: a minimum threshold, morphology and a 5-frame confirmation
+- Live motion detection at webcam frame rate on a standard laptop CPU
+- Detection zone: drag a rectangle with the mouse, and only motion inside it counts
+- Alarm: red banner, bounding box around the moving object, a bell on trigger, a snapshot every 3 s to `snapshots/`
+- Debug view (`d`): difference image, binary mask, and the histogram with the selected threshold
+- Noise robustness: a minimum threshold, morphological cleanup and a 5-frame confirmation
+- Resizable window that scales the camera image (640×480 by default)
 
 ## Pipeline
 
 ```
 webcam frame (BGR)
   → grayscale + Gaussian blur (5×5)
-  → diff = |frame − background|              ← BackgroundModel::diff
-  → T = Otsu threshold of diff (min 25)      ← otsuThreshold
-  → binary mask = diff > T                   ← thresholdMask
+  → diff = |frame − background|                ← BackgroundModel::diff
+  → T = Otsu threshold of diff (min 25)        ← otsuThreshold
+  → binary mask = diff > T                     ← thresholdMask
   → morphological opening 3×3, closing 7×7
-  → keep only the detection zone
+  → restrict to detection zone
   → contours with area ≥ 1500 px → bounding box
-  → motion 5 frames in a row? → ALARM        ← MotionDebouncer
-  → update background, except under the box  ← BackgroundModel::update + makeSlowMask
+  → motion 5 frames in a row? → ALARM          ← MotionDebouncer
+  → update background (10× slower under box)   ← BackgroundModel::update + makeSlowMask
 ```
 
-## Image-processing topics used
+## Techniques
 
-| Topic | Where |
+| Technique | Where |
 |---|---|
-| Grayscale conversion & Gaussian smoothing | `main.cpp` |
+| Grayscale conversion and Gaussian smoothing | `main.cpp` |
 | Histogram | `histogram()` in [`src/motion.cpp`](src/motion.cpp) |
 | Automatic thresholding (Otsu's method) | `otsuThreshold()` |
 | Binary segmentation | `thresholdMask()` |
 | Background modelling (running average) | `BackgroundModel` |
 | Morphology (opening / closing) | `main.cpp` |
-| Contours & region features (area, bounding box) | `main.cpp` |
+| Contours and region features (area, bounding box) | `main.cpp` |
 | Temporal filtering (hysteresis over frames) | `MotionDebouncer` |
 
-## Written by hand vs. OpenCV
+## From scratch vs. OpenCV
 
-| By hand ([`src/motion.cpp`](src/motion.cpp)) | OpenCV |
+| From scratch ([`src/motion.cpp`](src/motion.cpp)) | OpenCV |
 |---|---|
 | Running-average background model with a slow-learning mask | Camera capture, color → gray |
 | Absolute difference image | Gaussian blur |
 | 256-bin histogram + Otsu threshold | Morphological open / close |
 | Thresholding to a binary mask | `findContours`, `boundingRect` |
-| Motion debouncer (temporal filter) | Drawing, windows, mouse, `imwrite` |
+| Motion debouncer (temporal filter) | Drawing, windows, mouse input, `imwrite` |
 
-`tests/test_motion.cpp` checks each piece on synthetic images. One check compares my Otsu with
-`cv::threshold(..., THRESH_OTSU)` and requires the result to be within ±1 gray level.
+## Design notes
 
-### Two details worth mentioning
+- **A still intruder isn't absorbed right away.** While the alarm is active, the background learns 10× slower
+  under the bounding box, so an object that stops moving stays detected for about 20 s instead of about 2 s.
+- **The alarm can't lock on.** Because the box area still learns slowly, a lasting change (an object placed on the
+  desk, a lamp switched on) fades into the background and the alarm clears. If the change covers more than half
+  the frame, the whole background learns at full speed and the alarm clears within a few seconds.
 
-- **Standing still doesn't hide you right away.** While the alarm is on, the background learns 10× slower
-  under the intruder's box, so a person who freezes stays detected for about 20 s instead of about 2 s.
-- **The alarm can't get stuck on.** Because the box still learns slowly, a lasting change (a cup put on
-  the desk, a lamp switched on) fades into the background and the alarm clears by itself. A unit test
-  drives exactly this case. If the change covers more than half the frame, the whole background learns at
-  full speed and it clears in a few seconds.
+## Tests
 
-## Build & run (Fedora)
+`tests/test_motion.cpp` checks every from-scratch component on synthetic images, with no webcam needed:
+
+- the histogram counts and the Otsu threshold, including uniform images and a comparison with `cv::threshold(..., THRESH_OTSU)` (within ±1 gray level)
+- background learning, the slow-learning mask and re-initialization on a resolution change
+- the debouncer's on/off frame counts
+- an end-to-end check that the alarm clears after a lasting scene change
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+## Build & run
+
+**Fedora**
 
 ```bash
 sudo dnf install -y opencv-devel cmake gcc-c++
+```
+
+**Ubuntu / Debian**
+
+```bash
+sudo apt install libopencv-dev cmake g++
+```
+
+**Build and run**
+
+```bash
 cmake -B build
 cmake --build build
-ctest --test-dir build --output-on-failure   # unit tests
 ./build/intruder-alarm
 ```
 
-On Ubuntu/Debian, use `sudo apt install libopencv-dev cmake g++`.
-
 | Key / mouse | Action |
 |---|---|
-| drag left mouse | set the detection zone |
-| `r` | reset the zone to the full frame |
-| `d` | toggle the debug windows |
-| `q` | quit |
+| Drag with the left mouse button | Set the detection zone |
+| `r` | Reset the zone to the full frame |
+| `d` | Toggle the debug windows |
+| `q` or close the window | Quit |
 
-Stay out of the picture for the first second while it shows `WARMING UP`. That's the background learning
-the empty scene.
+During the first second (`WARMING UP`), the scene should be empty while the background model initializes.
 
-Tuning constants (learning rate, minimum threshold, minimum area, frame counts) are at the top of
+Tuning constants (learning rate, minimum threshold, minimum area, frame counts) are defined at the top of
 [`src/main.cpp`](src/main.cpp).
 
-## Known limits
+## Known limitations
 
-- **Sudden lighting changes** or objects moved on the desk trigger a false alarm that lasts a few seconds
-  (whole-room light) up to about 25 s (a local change) before the background adapts.
-- **Camera shake** shows up as motion everywhere. A fixed camera is assumed.
-- A person who stays perfectly still **after** the alarm has cleared is slowly absorbed into the background.
-- It detects motion, not people. A cat on the desk is an intruder too.
-
-## How the demo GIF was made
-
-1. Record the screen with the Fedora screen recorder (`Ctrl+Shift+Alt+R`)
-2. Convert: `ffmpeg -i rec.webm -vf "fps=12,scale=640:-1" docs/demo.gif`
+- **Screens in view:** monitors or TVs with changing content are detected as motion. Exclude them with the detection zone.
+- **Lighting changes:** sudden changes, or objects moved within the zone, cause a false alarm. It lasts from a few
+  seconds (whole-room light) up to about 25 s (a local change) until the background adapts.
+- **Camera movement:** shake or repositioning registers as motion everywhere. A fixed camera is assumed.
+- **Stillness:** an object that stays perfectly still after the alarm has cleared is gradually absorbed into the background.
+- **Motion, not people:** it detects any movement, not specifically people.
