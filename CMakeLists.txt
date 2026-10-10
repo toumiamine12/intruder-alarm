@@ -15,3 +15,6 @@ enable_testing()
 add_executable(test_motion tests/test_motion.cpp)
 target_link_libraries(test_motion motion)
 add_test(NAME test_motion COMMAND test_motion)
+
+add_executable(intruder-alarm src/main.cpp)
+target_link_libraries(intruder-alarm motion)
