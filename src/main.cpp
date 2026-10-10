@@ -2,7 +2,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <filesystem>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 #include <opencv2/highgui.hpp>
@@ -21,9 +26,43 @@ constexpr int kOnFrames = 5;          // motion frames in a row before alarm
 constexpr int kOffFrames = 15;        // quiet frames in a row before alarm clears
 constexpr int kWarmupFrames = 30;     // let the background settle at startup
 constexpr int kMaxEmptyFrames = 30;   // give up if the camera stops delivering
+constexpr double kSnapshotCooldownSec = 3.0;
 
 const char* const kMainWindow = "intruder-alarm";
 const char* const kDebugWindows[] = {"difference", "mask", "histogram"};
+
+// Mouse drag state for drawing the detection zone.
+struct ZoneDrag {
+    bool dragging = false;
+    cv::Point start, current;
+    bool finished = false;  // a drag just ended; main loop applies it
+};
+
+void onMouse(int event, int x, int y, int /*flags*/, void* userdata) {
+    auto* drag = static_cast<ZoneDrag*>(userdata);
+    if (event == cv::EVENT_LBUTTONDOWN) {
+        drag->dragging = true;
+        drag->start = drag->current = {x, y};
+    } else if (event == cv::EVENT_MOUSEMOVE && drag->dragging) {
+        drag->current = {x, y};
+    } else if (event == cv::EVENT_LBUTTONUP && drag->dragging) {
+        drag->dragging = false;
+        drag->current = {x, y};
+        drag->finished = true;
+    }
+}
+
+// Plays the desktop bell without blocking; terminal bell if paplay fails.
+void beep() {
+    std::system("(paplay /usr/share/sounds/freedesktop/stereo/bell.oga 2>/dev/null || printf '\\a') &");
+}
+
+std::string timestampName() {
+    const std::time_t t = std::time(nullptr);
+    std::ostringstream name;
+    name << "snapshots/" << std::put_time(std::localtime(&t), "%Y-%m-%d_%H-%M-%S") << ".png";
+    return name.str();
+}
 
 // Histogram of the difference image, log-scaled (bin 0 dwarfs everything else),
 // with the threshold T as a vertical line.
@@ -61,7 +100,16 @@ int main() {
     double fps = 0;
     auto lastTick = std::chrono::steady_clock::now();
 
+    std::error_code ec;
+    std::filesystem::create_directories("snapshots", ec);
+    if (ec) std::cerr << "Warning: cannot create snapshots/: " << ec.message() << "\n";
+
+    ZoneDrag drag;
+    bool wasAlarmOn = false;
+    auto lastSnapshot = std::chrono::steady_clock::time_point{};
+
     cv::namedWindow(kMainWindow);
+    cv::setMouseCallback(kMainWindow, onMouse, &drag);
 
     while (true) {
         cv::Mat frame;
@@ -77,6 +125,11 @@ int main() {
 
         const cv::Rect frameRect(cv::Point(), frame.size());
         zone &= frameRect;
+        if (drag.finished) {
+            drag.finished = false;
+            const cv::Rect newZone = normalizeZone(drag.start, drag.current, frame.size());
+            if (!newZone.empty()) zone = newZone;  // a click without a drag keeps the old zone
+        }
         if (zone.empty()) zone = frameRect;
 
         cv::Mat gray;
@@ -124,11 +177,32 @@ int main() {
 
         // Overlay
         cv::rectangle(frame, zone, cv::Scalar(0, 255, 255), 2);
+        if (drag.dragging)
+            cv::rectangle(frame, drag.start, drag.current, cv::Scalar(0, 255, 255), 1);
+
+        if (alarmOn) {
+            cv::rectangle(frame, box, cv::Scalar(0, 0, 255), 3);
+            cv::rectangle(frame, cv::Rect(0, 0, frame.cols, 50), cv::Scalar(0, 0, 255), cv::FILLED);
+            const std::string text = "INTRUDER";
+            int baseline = 0;
+            const cv::Size ts = cv::getTextSize(text, cv::FONT_HERSHEY_DUPLEX, 1.4, 3, &baseline);
+            cv::putText(frame, text, cv::Point((frame.cols - ts.width) / 2, 25 + ts.height / 2),
+                        cv::FONT_HERSHEY_DUPLEX, 1.4, cv::Scalar(255, 255, 255), 3);
+        }
         char status[64];
         std::snprintf(status, sizeof status, "%.0f fps  T=%d  %s", fps, T,
                       warmingUp ? "WARMING UP" : "ARMED");
         cv::putText(frame, status, cv::Point(10, frame.rows - 12), cv::FONT_HERSHEY_SIMPLEX, 0.6,
                     cv::Scalar(255, 255, 255), 2);
+
+        if (alarmOn && !wasAlarmOn) beep();
+        wasAlarmOn = alarmOn;
+
+        if (alarmOn && now - lastSnapshot >= std::chrono::duration<double>(kSnapshotCooldownSec)) {
+            lastSnapshot = now;
+            const std::string path = timestampName();
+            if (!cv::imwrite(path, frame)) std::cerr << "Warning: could not save " << path << "\n";
+        }
 
         cv::imshow(kMainWindow, frame);
         if (debug) {
@@ -139,6 +213,7 @@ int main() {
 
         const int key = cv::waitKey(1);
         if (key == 'q' || key == 'Q') break;
+        if (key == 'r' || key == 'R') zone = frameRect;
         if (key == 'd' || key == 'D') {
             debug = !debug;
             if (!debug)
