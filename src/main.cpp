@@ -108,7 +108,9 @@ int main() {
     bool wasAlarmOn = false;
     auto lastSnapshot = std::chrono::steady_clock::time_point{};
 
-    cv::namedWindow(kMainWindow);
+    // Resizable window, scaled up from the 640x480 camera image; processing size is unchanged.
+    cv::namedWindow(kMainWindow, cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO);
+    cv::resizeWindow(kMainWindow, 1280, 960);
     cv::setMouseCallback(kMainWindow, onMouse, &drag);
 
     while (true) {
