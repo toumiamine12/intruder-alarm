@@ -87,6 +87,21 @@ void test_normalize_zone() {
     assert(normalizeZone({5, 5}, {5, 100}, s).empty());
 }
 
+void test_debouncer_on_off() {
+    MotionDebouncer d;
+    for (int i = 0; i < 4; ++i) assert(!d.push(true));
+    assert(d.push(true));                       // 5th motion -> on
+    for (int i = 0; i < 14; ++i) assert(d.push(false));
+    assert(!d.push(false));                     // 15th quiet -> off
+}
+
+void test_debouncer_run_resets() {
+    MotionDebouncer d;
+    for (int i = 0; i < 3; ++i) d.push(true);
+    d.push(false);
+    for (int i = 0; i < 3; ++i) assert(!d.push(true));
+}
+
 int main() {
     test_histogram_counts();
     test_otsu_two_groups();
@@ -98,5 +113,7 @@ int main() {
     test_bg_reinit_on_size_change();
     test_skip_mask_light_change();
     test_normalize_zone();
+    test_debouncer_on_off();
+    test_debouncer_run_resets();
     std::puts("all tests passed");
 }

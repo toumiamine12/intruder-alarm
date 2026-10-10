@@ -101,3 +101,21 @@ cv::Rect normalizeZone(cv::Point a, cv::Point b, cv::Size frame) {
     if (r.width < 2 || r.height < 2) return {};
     return r;
 }
+
+MotionDebouncer::MotionDebouncer(int onFrames, int offFrames)
+    : onFrames_(onFrames), offFrames_(offFrames) {}
+
+bool MotionDebouncer::push(bool motion) {
+    if (motion) {
+        ++motionRun_;
+        quietRun_ = 0;
+        if (motionRun_ >= onFrames_) on_ = true;
+    } else {
+        ++quietRun_;
+        motionRun_ = 0;
+        if (quietRun_ >= offFrames_) on_ = false;
+    }
+    return on_;
+}
+
+bool MotionDebouncer::on() const { return on_; }

@@ -35,3 +35,16 @@ cv::Mat makeSkipMask(cv::Size frame, const cv::Rect& box);
 // Rectangle spanned by a drag from a to b in any direction, clipped to the
 // frame. Empty if narrower or shorter than 2 px.
 cv::Rect normalizeZone(cv::Point a, cv::Point b, cv::Size frame);
+
+// Temporal filter: alarm turns on after onFrames motion frames in a row and
+// off after offFrames quiet frames in a row, so single noisy frames don't flicker it.
+class MotionDebouncer {
+public:
+    MotionDebouncer(int onFrames = 5, int offFrames = 15);
+    bool push(bool motion);  // alarm state after this frame
+    bool on() const;
+
+private:
+    int onFrames_, offFrames_, motionRun_ = 0, quietRun_ = 0;
+    bool on_ = false;
+};
