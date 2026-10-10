@@ -215,6 +215,13 @@ int main() {
 
         const int key = cv::waitKey(1);
         if (key == 'q' || key == 'Q') break;
+        // Window closed with the X button (imshow would otherwise reopen it).
+        // The Qt backend throws instead of returning 0 once the window is gone.
+        try {
+            if (cv::getWindowProperty(kMainWindow, cv::WND_PROP_VISIBLE) < 1) break;
+        } catch (const cv::Exception&) {
+            break;
+        }
         if (key == 'r' || key == 'R') zone = frameRect;
         if (key == 'd' || key == 'D') {
             debug = !debug;
