@@ -44,11 +44,59 @@ void test_threshold_mask() {
     assert(m.at<uchar>(0, 0) == 0 && m.at<uchar>(0, 1) == 0 && m.at<uchar>(0, 2) == 255);
 }
 
+void test_bg_learns() {
+    cv::Mat f(60, 80, CV_8UC1, cv::Scalar(90));
+    BackgroundModel bg;
+    for (int i = 0; i < 100; ++i) bg.update(f, cv::Mat());
+    double mx; cv::minMaxLoc(bg.diff(f), nullptr, &mx);
+    assert(mx <= 1);
+}
+
+void test_bg_skip_mask() {
+    cv::Mat black(60, 80, CV_8UC1, cv::Scalar(0)), white(60, 80, CV_8UC1, cv::Scalar(255));
+    BackgroundModel bg(0.5f);
+    bg.update(black, cv::Mat());
+    cv::Rect box(10, 10, 20, 20);
+    cv::Mat skip(60, 80, CV_8UC1, cv::Scalar(0)); skip(box).setTo(255);
+    bg.update(white, skip);
+    cv::Mat d = bg.diff(white);
+    assert(d.at<uchar>(15, 15) == 255);   // inside box: not learned
+    assert(d.at<uchar>(50, 70) < 255);    // outside: learned
+}
+
+void test_bg_reinit_on_size_change() {
+    BackgroundModel bg;
+    bg.update(cv::Mat(60, 80, CV_8UC1, cv::Scalar(10)), cv::Mat());
+    cv::Mat big(120, 160, CV_8UC1, cv::Scalar(10));
+    bg.update(big, cv::Mat());
+    assert(bg.diff(big).size() == big.size());
+}
+
+void test_skip_mask_light_change() {
+    cv::Size s(80, 60);
+    assert(makeSkipMask(s, cv::Rect(0, 0, 80, 60)).empty());
+    assert(makeSkipMask(s, cv::Rect()).empty());
+    cv::Mat m = makeSkipMask(s, cv::Rect(10, 10, 20, 20));
+    assert(m.size() == s && m.at<uchar>(15, 15) == 255 && m.at<uchar>(0, 0) == 0);
+}
+
+void test_normalize_zone() {
+    cv::Size s(640, 480);
+    assert(normalizeZone({300, 200}, {100, 50}, s) == cv::Rect(100, 50, 200, 150));
+    assert(normalizeZone({-20, -20}, {700, 900}, s) == cv::Rect(0, 0, 640, 480));
+    assert(normalizeZone({5, 5}, {5, 100}, s).empty());
+}
+
 int main() {
     test_histogram_counts();
     test_otsu_two_groups();
     test_otsu_matches_opencv();
     test_otsu_uniform();
     test_threshold_mask();
+    test_bg_learns();
+    test_bg_skip_mask();
+    test_bg_reinit_on_size_change();
+    test_skip_mask_light_change();
+    test_normalize_zone();
     std::puts("all tests passed");
 }

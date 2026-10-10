@@ -49,3 +49,55 @@ cv::Mat thresholdMask(const cv::Mat& src, int T) {
     }
     return dst;
 }
+
+BackgroundModel::BackgroundModel(float alpha) : alpha_(alpha) {}
+
+bool BackgroundModel::initialized() const { return !bg_.empty(); }
+
+void BackgroundModel::update(const cv::Mat& gray, const cv::Mat& skipMask) {
+    CV_Assert(gray.type() == CV_8UC1);
+    if (bg_.size() != gray.size()) {
+        gray.convertTo(bg_, CV_32FC1);
+        return;
+    }
+    const bool useMask = !skipMask.empty();
+    if (useMask) CV_Assert(skipMask.type() == CV_8UC1 && skipMask.size() == gray.size());
+
+    for (int r = 0; r < gray.rows; ++r) {
+        const uchar* in = gray.ptr<uchar>(r);
+        const uchar* skip = useMask ? skipMask.ptr<uchar>(r) : nullptr;
+        float* b = bg_.ptr<float>(r);
+        for (int c = 0; c < gray.cols; ++c) {
+            if (skip && skip[c]) continue;
+            b[c] = (1.0f - alpha_) * b[c] + alpha_ * in[c];
+        }
+    }
+}
+
+cv::Mat BackgroundModel::diff(const cv::Mat& gray) const {
+    CV_Assert(initialized() && gray.type() == CV_8UC1 && gray.size() == bg_.size());
+    cv::Mat d(gray.size(), CV_8UC1);
+    for (int r = 0; r < gray.rows; ++r) {
+        const uchar* in = gray.ptr<uchar>(r);
+        const float* b = bg_.ptr<float>(r);
+        uchar* out = d.ptr<uchar>(r);
+        for (int c = 0; c < gray.cols; ++c)
+            out[c] = cv::saturate_cast<uchar>(std::abs(in[c] - b[c]));
+    }
+    return d;
+}
+
+cv::Mat makeSkipMask(cv::Size frame, const cv::Rect& box) {
+    if (box.empty() || box.area() > 0.5 * frame.area()) return {};
+    cv::Mat m(frame, CV_8UC1, cv::Scalar(0));
+    m(box & cv::Rect(cv::Point(), frame)).setTo(255);
+    return m;
+}
+
+cv::Rect normalizeZone(cv::Point a, cv::Point b, cv::Size frame) {
+    cv::Rect r(cv::Point(std::min(a.x, b.x), std::min(a.y, b.y)),
+               cv::Point(std::max(a.x, b.x), std::max(a.y, b.y)));
+    r &= cv::Rect(cv::Point(), frame);
+    if (r.width < 2 || r.height < 2) return {};
+    return r;
+}
