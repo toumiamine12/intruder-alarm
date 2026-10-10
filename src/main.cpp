@@ -168,7 +168,7 @@ int main() {
         const bool alarmOn = debouncer.push(!warmingUp && !box.empty());
 
         // Don't let an intruder who stands still fade into the background
-        background.update(gray, alarmOn ? makeSkipMask(gray.size(), box) : cv::Mat());
+        background.update(gray, alarmOn ? makeSlowMask(gray.size(), box) : cv::Mat());
 
         const auto now = std::chrono::steady_clock::now();
         const double dt = std::chrono::duration<double>(now - lastTick).count();

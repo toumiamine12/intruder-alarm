@@ -52,7 +52,7 @@ void test_bg_learns() {
     assert(mx <= 1);
 }
 
-void test_bg_skip_mask() {
+void test_bg_slow_mask() {
     cv::Mat black(60, 80, CV_8UC1, cv::Scalar(0)), white(60, 80, CV_8UC1, cv::Scalar(255));
     BackgroundModel bg(0.5f);
     bg.update(black, cv::Mat());
@@ -60,8 +60,8 @@ void test_bg_skip_mask() {
     cv::Mat skip(60, 80, CV_8UC1, cv::Scalar(0)); skip(box).setTo(255);
     bg.update(white, skip);
     cv::Mat d = bg.diff(white);
-    assert(d.at<uchar>(15, 15) == 255);   // inside box: not learned
-    assert(d.at<uchar>(50, 70) < 255);    // outside: learned
+    assert(d.at<uchar>(15, 15) > 200);    // inside box: learned 10x slower
+    assert(d.at<uchar>(50, 70) < 150);    // outside: learned at full speed
 }
 
 void test_bg_reinit_on_size_change() {
@@ -72,11 +72,11 @@ void test_bg_reinit_on_size_change() {
     assert(bg.diff(big).size() == big.size());
 }
 
-void test_skip_mask_light_change() {
+void test_slow_mask_light_change() {
     cv::Size s(80, 60);
-    assert(makeSkipMask(s, cv::Rect(0, 0, 80, 60)).empty());
-    assert(makeSkipMask(s, cv::Rect()).empty());
-    cv::Mat m = makeSkipMask(s, cv::Rect(10, 10, 20, 20));
+    assert(makeSlowMask(s, cv::Rect(0, 0, 80, 60)).empty());
+    assert(makeSlowMask(s, cv::Rect()).empty());
+    cv::Mat m = makeSlowMask(s, cv::Rect(10, 10, 20, 20));
     assert(m.size() == s && m.at<uchar>(15, 15) == 255 && m.at<uchar>(0, 0) == 0);
 }
 
@@ -102,6 +102,31 @@ void test_debouncer_run_resets() {
     for (int i = 0; i < 3; ++i) assert(!d.push(true));
 }
 
+// Same decision chain as main.cpp (minus morphology). A lasting change in the
+// scene, like a cup put on the desk, must not lock the alarm on forever.
+void test_alarm_clears_after_lasting_change() {
+    const cv::Size size(640, 480);
+    cv::Mat empty(size, CV_8UC1, cv::Scalar(100));
+    cv::Mat changed = empty.clone();
+    changed(cv::Rect(200, 150, 200, 200)).setTo(200);
+
+    BackgroundModel bg;
+    MotionDebouncer deb;
+    bg.update(empty, cv::Mat());
+    bool everOn = false;
+    int clearedAt = -1;
+    for (int i = 0; i < 900 && clearedAt < 0; ++i) {  // 30 s at 30 fps
+        cv::Mat mask = thresholdMask(bg.diff(changed), std::max(otsuThreshold(bg.diff(changed)), 25));
+        cv::Rect box = cv::boundingRect(mask);
+        bool on = deb.push(box.area() >= 1500);
+        everOn |= on;
+        if (everOn && !on) clearedAt = i;
+        bg.update(changed, on ? makeSlowMask(size, box) : cv::Mat());
+    }
+    assert(everOn);
+    assert(clearedAt > 0);
+}
+
 int main() {
     test_histogram_counts();
     test_otsu_two_groups();
@@ -109,11 +134,12 @@ int main() {
     test_otsu_uniform();
     test_threshold_mask();
     test_bg_learns();
-    test_bg_skip_mask();
+    test_bg_slow_mask();
     test_bg_reinit_on_size_change();
-    test_skip_mask_light_change();
+    test_slow_mask_light_change();
     test_normalize_zone();
     test_debouncer_on_off();
     test_debouncer_run_resets();
+    test_alarm_clears_after_lasting_change();
     std::puts("all tests passed");
 }

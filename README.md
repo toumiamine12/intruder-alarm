@@ -1,12 +1,14 @@
 # Desk Intruder Alarm
 
+<!-- Record the demo first (see "How the demo GIF was made"), then uncomment:
 ![demo](docs/demo.gif)
+-->
 
 A webcam watches your desk. When something moves inside the zone you draw, a red **INTRUDER** banner appears,
 the moving object gets boxed, a bell rings and a timestamped snapshot is saved.
 
 The core image-processing pipeline (background model, histogram, Otsu threshold, temporal filter) is
-**written by hand in C++**, and a unit test checks it against OpenCV's own implementation.
+**written by hand in C++**, and unit tests check every piece; my Otsu is checked against OpenCV's own implementation.
 
 Built as a portfolio project for my **Image Processing (Bildverarbeitung)** module.
 
@@ -30,7 +32,7 @@ webcam frame (BGR)
   → keep only the detection zone
   → contours with area ≥ 1500 px → bounding box
   → motion 5 frames in a row? → ALARM        ← MotionDebouncer
-  → update background, except under the box  ← BackgroundModel::update + makeSkipMask
+  → update background, except under the box  ← BackgroundModel::update + makeSlowMask
 ```
 
 ## Image-processing topics used
@@ -50,7 +52,7 @@ webcam frame (BGR)
 
 | By hand ([`src/motion.cpp`](src/motion.cpp)) | OpenCV |
 |---|---|
-| Running-average background model with a skip mask | Camera capture, color → gray |
+| Running-average background model with a slow-learning mask | Camera capture, color → gray |
 | Absolute difference image | Gaussian blur |
 | 256-bin histogram + Otsu threshold | Morphological open / close |
 | Thresholding to a binary mask | `findContours`, `boundingRect` |
@@ -61,10 +63,12 @@ webcam frame (BGR)
 
 ### Two details worth mentioning
 
-- **Standing still doesn't hide you.** While the alarm is on, the background stops learning under the
-  intruder's box, so a person who freezes doesn't slowly fade into the background.
-- **Light switches don't jam it.** If the "motion" covers more than half the frame (for example, a lamp
-  turned on), the whole background keeps learning, so the alarm clears by itself.
+- **Standing still doesn't hide you right away.** While the alarm is on, the background learns 10× slower
+  under the intruder's box, so a person who freezes stays detected for about 20 s instead of about 2 s.
+- **The alarm can't get stuck on.** Because the box still learns slowly, a lasting change (a cup put on
+  the desk, a lamp switched on) fades into the background and the alarm clears by itself. A unit test
+  drives exactly this case. If the change covers more than half the frame, the whole background learns at
+  full speed and it clears in a few seconds.
 
 ## Build & run (Fedora)
 
@@ -93,7 +97,8 @@ Tuning constants (learning rate, minimum threshold, minimum area, frame counts) 
 
 ## Known limits
 
-- **Sudden lighting changes** can trigger a short false alarm before the background adapts.
+- **Sudden lighting changes** or objects moved on the desk trigger a false alarm that lasts a few seconds
+  (whole-room light) up to about 25 s (a local change) before the background adapts.
 - **Camera shake** shows up as motion everywhere. A fixed camera is assumed.
 - A person who stays perfectly still **after** the alarm has cleared is slowly absorbed into the background.
 - It detects motion, not people. A cat on the desk is an intruder too.

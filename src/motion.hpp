@@ -13,12 +13,14 @@ int otsuThreshold(const cv::Mat& gray);
 cv::Mat thresholdMask(const cv::Mat& src, int T);
 
 // Running-average background: bg = (1 - alpha) * bg + alpha * gray, per pixel.
+// Pixels under slowMask learn 10x slower, so a still intruder doesn't vanish
+// within seconds, but a lasting scene change (cup on the desk) still fades in.
 class BackgroundModel {
 public:
     explicit BackgroundModel(float alpha = 0.02f);
     // First call (or a frame size change) sets bg = gray.
-    // skipMask: CV_8UC1, non-zero = don't update that pixel. May be empty.
-    void update(const cv::Mat& gray, const cv::Mat& skipMask);
+    // slowMask: CV_8UC1, non-zero = learn at alpha / 10. May be empty.
+    void update(const cv::Mat& gray, const cv::Mat& slowMask);
     // |gray - bg| as CV_8UC1. Requires update() to have run once.
     cv::Mat diff(const cv::Mat& gray) const;
     bool initialized() const;
@@ -28,9 +30,9 @@ private:
     cv::Mat bg_;  // CV_32FC1
 };
 
-// Mask for BackgroundModel::update. Empty (= learn everywhere) when the box is
+// Mask for BackgroundModel::update. Empty (= normal speed everywhere) when the box is
 // empty or covers more than half the frame, e.g. a light switched on.
-cv::Mat makeSkipMask(cv::Size frame, const cv::Rect& box);
+cv::Mat makeSlowMask(cv::Size frame, const cv::Rect& box);
 
 // Rectangle spanned by a drag from a to b in any direction, clipped to the
 // frame. Empty if narrower or shorter than 2 px.

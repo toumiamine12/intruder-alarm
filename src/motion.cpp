@@ -54,22 +54,23 @@ BackgroundModel::BackgroundModel(float alpha) : alpha_(alpha) {}
 
 bool BackgroundModel::initialized() const { return !bg_.empty(); }
 
-void BackgroundModel::update(const cv::Mat& gray, const cv::Mat& skipMask) {
+void BackgroundModel::update(const cv::Mat& gray, const cv::Mat& slowMask) {
     CV_Assert(gray.type() == CV_8UC1);
     if (bg_.size() != gray.size()) {
         gray.convertTo(bg_, CV_32FC1);
         return;
     }
-    const bool useMask = !skipMask.empty();
-    if (useMask) CV_Assert(skipMask.type() == CV_8UC1 && skipMask.size() == gray.size());
+    const bool useMask = !slowMask.empty();
+    const float slowAlpha = alpha_ * 0.1f;
+    if (useMask) CV_Assert(slowMask.type() == CV_8UC1 && slowMask.size() == gray.size());
 
     for (int r = 0; r < gray.rows; ++r) {
         const uchar* in = gray.ptr<uchar>(r);
-        const uchar* skip = useMask ? skipMask.ptr<uchar>(r) : nullptr;
+        const uchar* slow = useMask ? slowMask.ptr<uchar>(r) : nullptr;
         float* b = bg_.ptr<float>(r);
         for (int c = 0; c < gray.cols; ++c) {
-            if (skip && skip[c]) continue;
-            b[c] = (1.0f - alpha_) * b[c] + alpha_ * in[c];
+            const float a = (slow && slow[c]) ? slowAlpha : alpha_;
+            b[c] = (1.0f - a) * b[c] + a * in[c];
         }
     }
 }
@@ -87,7 +88,7 @@ cv::Mat BackgroundModel::diff(const cv::Mat& gray) const {
     return d;
 }
 
-cv::Mat makeSkipMask(cv::Size frame, const cv::Rect& box) {
+cv::Mat makeSlowMask(cv::Size frame, const cv::Rect& box) {
     if (box.empty() || box.area() > 0.5 * frame.area()) return {};
     cv::Mat m(frame, CV_8UC1, cv::Scalar(0));
     m(box & cv::Rect(cv::Point(), frame)).setTo(255);
